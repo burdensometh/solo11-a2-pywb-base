@@ -1,0 +1,169 @@
+#!/usr/bin/env python
+# vim: set sw=4 et:
+
+from setuptools import setup, find_packages
+from setuptools.command.test import test as TestCommand
+import glob
+import os
+import pathlib
+import sys
+import urllib.request
+
+from pywb import __version__
+
+
+root_dir = pathlib.Path(__file__).parent
+
+
+WABAC_SW_VERSION = "2.27.4"
+WABAC_SW_URL = f"https://cdn.jsdelivr.net/npm/@webrecorder/wabac@{WABAC_SW_VERSION}/dist/sw.js"
+
+def download_wabac_sw():
+    sw_path = root_dir.joinpath("pywb", "static", "wabacSW.js")
+    expected_header = f"/*! sw.js (wabac.js {WABAC_SW_VERSION})".encode("ascii")
+    if sw_path.is_file():
+        with sw_path.open("rb") as fh:
+            if fh.read(len(expected_header)) == expected_header:
+                return
+
+    print(f"Downloading {WABAC_SW_URL}")
+    with urllib.request.urlopen(WABAC_SW_URL) as response:  # nosec
+        sw_data = response.read()
+    if not sw_data.startswith(expected_header):
+        raise ValueError(f"Downloaded service worker is not wabac.js {WABAC_SW_VERSION}")
+
+    sw_path.write_bytes(sw_data)
+
+
+download_wabac_sw()
+
+
+def get_long_description():
+    with open('README.rst', 'r') as fh:
+        long_description = fh.read()
+    return long_description
+
+
+class PyTest(TestCommand):
+    user_options = []
+
+    def finalize_options(self):
+        TestCommand.finalize_options(self)
+        self.test_suite = ' '
+
+    def run_tests(self):
+        from gevent.monkey import patch_all
+        patch_all()
+
+        import pytest
+        import os
+        os.environ.pop('PYWB_CONFIG_FILE', None)
+        cmdline = '--cov-config .coveragerc --cov pywb'
+        cmdline += ' -v --doctest-modules ./pywb/ tests/'
+
+        errcode = pytest.main(cmdline.split(' '))
+
+        sys.exit(errcode)
+
+
+def get_git_short_hash():
+    import subprocess
+    try:
+        hash_id = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD']).rstrip()
+        if sys.version_info >= (3, 0):
+            hash_id = hash_id.decode('utf-8')
+
+        return hash_id
+    except Exception:
+        return ''
+
+
+def generate_git_hash_py(pkg, filename='git_hash.py'):
+    try:
+        git_hash = get_git_short_hash()
+        with open(os.path.join(pkg, filename), 'wt') as fh:
+            fh.write('git_hash = "{0}"\n'.format(git_hash))
+    except Exception:
+        pass
+
+
+def load_requirements(filename):
+    with open(filename, 'rt') as fh:
+        requirements = fh.read().rstrip().split('\n')
+    return requirements
+
+
+def get_package_data():
+    pkgs = ['static/*.*',
+            'templates/*',
+            '*.yaml']
+
+    for root, dirs, files in os.walk(os.path.join('pywb', 'static')):
+        for dir_ in dirs:
+            pkgs.append(os.path.relpath(os.path.join(root, dir_, '*'), 'pywb'))
+
+    return pkgs
+
+
+generate_git_hash_py('pywb')
+
+setup(
+    name='pywb',
+    version=__version__,
+    url='https://github.com/webrecorder/pywb',
+    author='Ilya Kreymer',
+    author_email='ikreymer@gmail.com',
+    description='Pywb web archive replay toolkit',
+    long_description=get_long_description(),
+    license='GPL',
+    packages=find_packages(exclude=['tests','tests.*','tests_disabled','*.test','*.test.*']),
+    zip_safe=False,
+    package_data={
+        'pywb': get_package_data(),
+    },
+    install_requires=load_requirements('requirements.txt'),
+    extras_require={
+        "i18n":  [
+            "babel",
+            "translate_toolkit",
+            "babel-vue-extractor"
+        ],
+    },
+    python_requires='>=3.9',
+    tests_require=load_requirements("test_requirements.txt"),
+    cmdclass={'test': PyTest},
+    test_suite='',
+    entry_points="""
+        [console_scripts]
+        pywb = pywb.apps.cli:wayback
+        wayback = pywb.apps.cli:wayback
+        cdx-server = pywb.apps.cli:cdx_server
+        live-rewrite-server = pywb.apps.cli:live_rewrite_server
+        cdx-indexer = pywb.indexer.cdxindexer:main
+        wb-manager = pywb.manager.manager:main_wrap_exc
+        warcserver = pywb.apps.cli:warcserver
+        """,
+    classifiers=[
+        'Development Status :: 4 - Beta',
+        'Environment :: Web Environment',
+        'License :: OSI Approved :: GNU General Public License (GPL)',
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
+        'Programming Language :: Python :: 3',
+        'Programming Language :: Python :: 3.9',
+        'Programming Language :: Python :: 3.10',
+        'Programming Language :: Python :: 3.11',
+        'Programming Language :: Python :: 3.12',
+        'Programming Language :: Python :: 3.13',
+        'Programming Language :: Python :: 3.14',
+        'Programming Language :: Python :: 3.15',
+        'Topic :: Internet :: Proxy Servers',
+        'Topic :: Internet :: WWW/HTTP',
+        'Topic :: Internet :: WWW/HTTP :: WSGI',
+        'Topic :: Internet :: WWW/HTTP :: WSGI :: Application',
+        'Topic :: Internet :: WWW/HTTP :: WSGI :: Middleware',
+        'Topic :: Internet :: WWW/HTTP :: WSGI :: Server',
+        'Topic :: Software Development :: Libraries :: Python Modules',
+        'Topic :: System :: Archiving',
+        'Topic :: System :: Archiving :: Backup',
+        'Topic :: Utilities',
+    ])
